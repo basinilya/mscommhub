@@ -40,6 +40,7 @@ struct ctx_t {
 	{
 		int i;
 		DCB dcb = { 0 };
+		DWORD dwModemStatus;
 		COMMTIMEOUTS timeouts = { 0 };
 
 		if (sizeof(ports) / sizeof(ports[0]) <= nWaitObjects) {
@@ -67,7 +68,31 @@ struct ctx_t {
 			FaiL;
 		}
 
+		if (!GetCommModemStatus(port->hComm, &dwModemStatus)) {
+			pWin32Error(ERR, "GetCommModemStatus() failed");
+			CloseHandle(port->hComm);
+			FaiL;
+		}
+
+		
+		dcb.fInX = 0;
+		dcb.fOutX = 0;
+
 		log(INFO, "%s: %d,%c,%d,%s", path, dcb.BaudRate, parity[dcb.Parity], dcb.ByteSize, stops[dcb.StopBits]);
+		log(INFO, "fParity:%d, fOutxCtsFlow:%d, fOutxDsrFlow:%d, fDtrControl:%d, fDsrSensitivity:%d"
+			", fTXContinueOnXoff:%d, fOutX:%d, fInX:%d, fErrorChar:%02X, fNull:%d, fRtsControl:%d"
+			", fAbortOnError:%d, XonLim:%d, XoffLim:%d"
+			", XonChar:%02X, XoffChar:%02X, ErrorChar:%02X, EofChar:%02X, EvtChar:%02X"
+			, dcb.fParity, dcb.fOutxCtsFlow, dcb.fOutxDsrFlow, dcb.fDtrControl, dcb.fDsrSensitivity
+			, dcb.fTXContinueOnXoff, dcb.fOutX, dcb.fInX, dcb.fErrorChar, dcb.fNull, dcb.fRtsControl
+			, dcb.fAbortOnError, dcb.XonLim, dcb.XoffLim
+			, dcb.XonChar & 0xFF, dcb.XoffChar & 0xFF, dcb.ErrorChar & 0xFF, dcb.EofChar & 0xFF, dcb.EvtChar & 0xFF);
+
+		if (!SetCommState(port->hComm, &dcb)) {
+			pWin32Error(ERR, "SetCommState() failed");
+			CloseHandle(port->hComm);
+			FaiL;
+		}
 
 		timeouts.ReadIntervalTimeout = 1000 / dcb.BaudRate + 1;
 
@@ -95,6 +120,7 @@ struct ctx_t {
 	}
 
 	void write_complete(cncport_t *port, DWORD nb) {
+		ResetEvent(port->osWriter.hEvent);
 		if (nb == 0) {
 			log(DBG, "write timeout on port %s", port->name);
 			return;
@@ -156,7 +182,6 @@ struct ctx_t {
 						}
 						else {
 							write_complete(&ports[dw], nb);
-							ResetEvent(ports[dw].osWriter.hEvent);
 						}
 					}
 				}
@@ -167,7 +192,7 @@ struct ctx_t {
 			log(TRACE, "waiting completion on %u of %u ports...", npending, nWaitObjects);
 			dw = WaitForMultipleObjects(nWaitObjects, writeEvents, FALSE, INFINITE);
 			if (!GetOverlappedResult(ports[dw].hComm, &ports[dw].osWriter, &nb, FALSE)) {
-				pWin32Error(ERR, "WriteFile() failed");
+				pWin32Error(ERR, "overlapped WriteFile() failed");
 				exit(1);
 			}
 			ports[dw].writePending = FALSE;
@@ -232,7 +257,7 @@ int m(int argc, char *argv[]) {
 			SetLastError(0);
 			if (!GetOverlappedResult(ports[dw].hComm, &ports[dw].osReader, &nb, FALSE)) {
 				if (GetLastError() != ERROR_OPERATION_ABORTED) {
-					pWin32Error(ERR, "ReadFile() failed");
+					pWin32Error(ERR, "overlapped ReadFile() failed");
 					return 1;
 				}
 				else {
