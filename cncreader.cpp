@@ -11,24 +11,6 @@
 
 #include "mylastheader.h"
 
-
-
-
-static DWORD WINAPI reader_thread(LPVOID lpThreadParameter)
-{
-	HANDLE hComm = NULL;
-	char buf[100];
-	DWORD dw, nb;
-	while (ReadFile(hComm, buf, 2, &nb, NULL)) {
-		for (dw = 0; dw < nb; dw++) {
-			printf("< %02X\n", buf[dw] & 0xFF);
-			fflush(stdout);
-		}
-	}
-	pWin32Error(ERR, "ReadFile() failed");
-	return 0;
-}
-
 #undef FaiL
 #define FaiL return -1
 
@@ -55,7 +37,6 @@ struct ctx_t {
 	int portindex;
 	int namewidth;
 	DWORD nWaitObjects;
-	BOOL trace;
 
 	int port_open(const char *path)
 	{
@@ -116,6 +97,13 @@ struct ctx_t {
 	}
 
 	void write_complete(cncport_t *port, DWORD nb) {
+		if (nb == 0) {
+			log(DBG, "write timeout on port %s", port->name);
+			return;
+		}
+		if (myprog_loglevel <= TRACE) {
+			log(TRACE, "wrote %u bytes on port %s", nb, port->name);
+		}
 		port->written += nb;
 		port->remain -= nb;
 	}
@@ -124,15 +112,17 @@ struct ctx_t {
 		BOOL havePendingWrites;
 		DWORD dw;
 		if (nb == 0) {
+			log(DBG, "read cancel or timeout on port %s", port->name);
 			return;
 		}
-		if (trace) {
-			printf("< %*s:", namewidth, port->name);
+		if (myprog_loglevel <= TRACE) {
+			log(TRACE, "got %u bytes on port %s", nb, port->name);
+			fprintf(stderr, "< %*s:", namewidth, port->name);
 			for (dw = 0; dw < nb; dw++) {
-				printf(" %02X", port->buf[dw] & 0xFF);
+				fprintf(stderr, " %02X", port->buf[dw] & 0xFF);
 			}
-			printf("\n");
-			fflush(stdout);
+			fprintf(stderr, "\n");
+			fflush(stderr);
 		}
 		for (dw = 0; dw < nWaitObjects; dw++) {
 			if (ports[dw].readPending) {
@@ -178,9 +168,7 @@ struct ctx_t {
 				exit(1);
 			}
 			ports[dw].writePending = FALSE;
-			if (nb != 0) {
-				write_complete(&ports[dw], nb);
-			}
+			write_complete(&ports[dw], nb);
 		}
 	}
 
@@ -192,7 +180,7 @@ int m(int argc, char *argv[]) {
 
 	namewidth = 0;
 	nWaitObjects = 0;
-	trace = 0;
+	myprog_loglevel = TRACE;
 
 	for (i = 1; i < argc; i++) {
 		if (0 != port_open(argv[i])) {
@@ -231,13 +219,17 @@ int m(int argc, char *argv[]) {
 			}
 		}
 		if (havePendingReads) {
-			dw = WaitForMultipleObjects(nWaitObjects, readEvents, FALSE, INFINITE);
+			log(TRACE, "waiting data from %u ports...", nWaitObjects);
+			dw = dbg_WaitForMultipleObjects(nWaitObjects, readEvents, FALSE, INFINITE);
 			nb = -1;
 			SetLastError(0);
 			if (!GetOverlappedResult(ports[dw].hComm, &ports[dw].osReader, &nb, FALSE)) {
 				if (GetLastError() != ERROR_OPERATION_ABORTED) {
 					pWin32Error(ERR, "ReadFile() failed");
 					return 1;
+				}
+				else {
+					log(TRACE, "read cancelled on port %s", ports[dw].name);
 				}
 			}
 			ports[dw].readPending = FALSE;

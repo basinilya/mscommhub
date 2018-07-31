@@ -14,9 +14,11 @@
 
 #include "mylastheader.h"
 
+int myprog_loglevel;
+
 static void _myprog_log(int level, char const *emsg)
 {
-	if (level == MYPROG_LOG_DEBUG) return;
+	if (level < myprog_loglevel) return;
 	fputs(emsg, stdout);
 	fflush(stdout);
 }
@@ -106,7 +108,9 @@ void myprog_log(int lvl, char const *fmt, ...)
 {
 	va_list args;
 
-	va_start(args, fmt);
-	__myprog_log(lvl, 'm', 0, fmt, args);
-	va_end(args);
+	if (lvl >= myprog_loglevel) {
+		va_start(args, fmt);
+		__myprog_log(lvl, 'm', 0, fmt, args);
+		va_end(args);
+	}
 }

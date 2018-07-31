@@ -1,8 +1,11 @@
 /* local */
+#undef TRACE
 #undef DBG
 #undef INFO
 #undef WARN
 #undef ERR
+
+#define TRACE MYPROG_LOG_TRACE
 #define DBG MYPROG_LOG_DEBUG
 #define INFO MYPROG_LOG_MESSAGE
 #define WARN MYPROG_LOG_WARNING
