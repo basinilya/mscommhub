@@ -111,6 +111,7 @@ struct ctx_t {
 	void read_complete(cncport_t *port, DWORD nb) {
 		BOOL havePendingWrites;
 		DWORD dw;
+		DWORD npending;
 		if (nb == 0) {
 			log(DBG, "read cancel or timeout on port %s", port->name);
 			return;
@@ -136,9 +137,11 @@ struct ctx_t {
 
 		for (;;) {
 			havePendingWrites = FALSE;
+			npending = 0;
 			for (dw = 0; dw < nWaitObjects; dw++) {
 				if (ports[dw].writePending) {
 					havePendingWrites = TRUE;
+					npending++;
 				}
 				else {
 					if (ports[dw].remain != 0) {
@@ -150,6 +153,7 @@ struct ctx_t {
 							else {
 								ports[dw].writePending = TRUE;
 								havePendingWrites = TRUE;
+								npending++;
 							}
 						}
 						else {
@@ -162,6 +166,7 @@ struct ctx_t {
 			if (!havePendingWrites) {
 				break;
 			}
+			log(TRACE, "waiting completion on %u of %u ports...", npending, nWaitObjects);
 			dw = WaitForMultipleObjects(nWaitObjects, writeEvents, FALSE, INFINITE);
 			if (!GetOverlappedResult(ports[dw].hComm, &ports[dw].osWriter, &nb, FALSE)) {
 				pWin32Error(ERR, "WriteFile() failed");
@@ -175,6 +180,7 @@ struct ctx_t {
 
 int m(int argc, char *argv[]) {
 	BOOL havePendingReads;
+	DWORD npending;
 	DWORD dw, nb;
 	int i;
 
@@ -195,9 +201,11 @@ int m(int argc, char *argv[]) {
 
 	for (;;) {
 		havePendingReads = FALSE;
+		npending = 0;
 		for (dw = 0; dw < nWaitObjects; dw++) {
 			if (ports[dw].readPending) {
 				havePendingReads = TRUE;
+				npending++;
 			}
 			else {
 				nb = -1;
@@ -210,6 +218,7 @@ int m(int argc, char *argv[]) {
 					else {
 						ports[dw].readPending = TRUE;
 						havePendingReads = TRUE;
+						npending++;
 					}
 				}
 				else {
@@ -219,7 +228,7 @@ int m(int argc, char *argv[]) {
 			}
 		}
 		if (havePendingReads) {
-			log(TRACE, "waiting data from %u ports...", nWaitObjects);
+			log(TRACE, "waiting data on %u of %u ports...", npending, nWaitObjects);
 			dw = dbg_WaitForMultipleObjects(nWaitObjects, readEvents, FALSE, INFINITE);
 			nb = -1;
 			SetLastError(0);
@@ -229,7 +238,7 @@ int m(int argc, char *argv[]) {
 					return 1;
 				}
 				else {
-					log(TRACE, "read cancelled on port %s", ports[dw].name);
+					log(TRACE, "read cancelled earlier on port %s", ports[dw].name);
 				}
 			}
 			ports[dw].readPending = FALSE;
